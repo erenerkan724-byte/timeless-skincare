@@ -67,6 +67,7 @@ export default function SkincareCoach() {
   const [concerns, setConcerns] = useState([]);
   const [routine, setRoutine] = useState(null);
   const [cameraActive, setCameraActive] = useState(false);
+  const [cameraReady, setCameraReady] = useState(false);
   const [cameraError, setCameraError] = useState("");
   const [analyzing, setAnalyzing] = useState(false);
   const [analysisResult, setAnalysisResult] = useState(null);
@@ -82,17 +83,32 @@ export default function SkincareCoach() {
 
   const startCamera = async () => {
     setCameraError("");
+    setCameraReady(false);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: { ideal: 640 }, height: { ideal: 480 } }, audio: false });
       streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        await videoRef.current.play();
+        videoRef.current.setAttribute("playsinline", true);
+        videoRef.current.setAttribute("muted", true);
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current.play().then(() => {
+            setCameraActive(true);
+            setCameraReady(true);
+          }).catch(() => {
+            setCameraActive(true);
+            setCameraReady(true);
+          });
+        };
+        // Fallback if onloadedmetadata doesn't fire
+        setTimeout(() => {
+          setCameraActive(true);
+          setCameraReady(true);
+        }, 1500);
       }
-      setCameraActive(true);
     } catch (err) {
       if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
-        setCameraError("Kamera izni reddedildi. Tarayıcı adres çubuğundaki kilit/kamera ikonuna tıklayıp izin verin, sonra sayfayı yenileyin.");
+        setCameraError("Kamera izni reddedildi. Tarayıcı adres çubuğundaki kilit ikonuna tıklayıp kamera iznini açın, sonra sayfayı yenileyin.");
       } else if (err.name === "NotFoundError") {
         setCameraError("Kamera bulunamadı. Cihazınızda kamera olduğundan emin olun.");
       } else {
@@ -104,17 +120,23 @@ export default function SkincareCoach() {
   const stopCamera = () => {
     if (streamRef.current) streamRef.current.getTracks().forEach(t => t.stop());
     setCameraActive(false);
+    setCameraReady(false);
   };
 
   const captureAndAnalyze = useCallback(async () => {
-    if (!videoRef.current || !canvasRef.current || !cameraActive) {
-      setCameraError("Önce kamerayı açın.");
+    if (!cameraReady || !videoRef.current || !canvasRef.current) {
+      setCameraError("Kamera henüz hazır değil, 2-3 saniye bekleyip tekrar deneyin.");
+      return;
+    }
+    const video = videoRef.current;
+    if (video.videoWidth === 0) {
+      setCameraError("Kamera görüntüsü alınamadı. Sayfayı yenileyip tekrar deneyin.");
       return;
     }
     const canvas = canvasRef.current;
-    canvas.width = videoRef.current.videoWidth || 640;
-    canvas.height = videoRef.current.videoHeight || 480;
-    canvas.getContext("2d").drawImage(videoRef.current, 0, 0);
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    canvas.getContext("2d").drawImage(video, 0, 0);
     const imageData = canvas.toDataURL("image/jpeg", 0.8).split(",")[1];
     stopCamera();
     setAnalyzing(true);
@@ -141,7 +163,7 @@ export default function SkincareCoach() {
     }
     setAnalyzing(false);
     setStep("analysis");
-  }, [cameraActive]);
+  }, [cameraReady]);
 
   const buildRoutine = (detectedSkinType) => {
     const r = generateRoutine(concerns, detectedSkinType || "Normal", parseInt(age) || 30);
@@ -262,7 +284,9 @@ export default function SkincareCoach() {
         <div style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "12px" }}>
           {!cameraActive
             ? <button style={s.btn} onClick={startCamera}>📷 Kamerayı Aç</button>
-            : <button style={s.btnGreen} onClick={captureAndAnalyze}>📸 Fotoğraf Çek & Analiz Et</button>
+            : <button style={cameraReady ? s.btnGreen : s.btnOutline} onClick={captureAndAnalyze} disabled={!cameraReady}>
+                {cameraReady ? "📸 Fotoğraf Çek & Analiz Et" : "⏳ Kamera hazırlanıyor..."}
+              </button>
           }
           <button style={s.btnOutline} onClick={() => { stopCamera(); buildRoutine("Normal"); }}>Kamerasız Devam Et</button>
         </div>
